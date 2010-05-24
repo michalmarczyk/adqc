@@ -1,4 +1,5 @@
-(ns adqc.util)
+(ns adqc.util
+  (:use [clojure.contrib.string :as str :only []]))
 
 (defn extract-info [extractors item]
   (reduce (fn [m [k e]]
@@ -6,10 +7,13 @@
           {}
           extractors))
 
+(defn keyword->getter [k]
+  (symbol (apply str "get" (map str/capitalize (.split #"-" (name k))))))
+
 (defn make-extractor [arg spec]
   (cond (keyword? spec)
         `(fn [~arg]
-           (. ~arg ~(symbol (name spec))))
+           (. ~arg ~(keyword->getter spec)))
         (symbol? spec)
         `(fn [~arg]
            (~spec ~arg))
@@ -17,7 +21,7 @@
         `(fn [~arg]
            (~(first spec)
             ~(if (keyword? (second spec))
-               `(. ~arg ~(symbol (name (second spec))))
+               `(. ~arg ~(keyword->getter (second spec)))
                `(~(first spec) ~arg ~(second spec)))
             ~@(nnext spec)))))
 
