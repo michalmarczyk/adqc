@@ -53,8 +53,8 @@
   (antlr->clojure [self]))
 
 (defextractors token-info-extractors CommonToken
-  :ttype getType
-  :text getText)
+  :ttype :getType
+  :text :getText)
 
 (defn node-children [^CommonTree node]
   (let [cnt (.getChildCount node)]
@@ -67,11 +67,11 @@
         children))))
 
 (defextractors node-info-extractors CommonTree
-  :ntype getType
-  :nkey (->> getText (str/replace-re #"_" "-") (str/lower-case) keyword)
-  :token (-> getToken antlr->clojure)
-  :text getText
-  :children :node-children)
+  :ntype :getType
+  :nkey (->> :getText (str/replace-re #"_" "-") (str/lower-case) keyword)
+  :token (-> :getToken antlr->clojure)
+  :text :getText
+  :children node-children)
 
 (extend-protocol ANTLR->Clojure
   CommonTree

@@ -7,15 +7,19 @@
           extractors))
 
 (defn make-extractor [arg spec]
-  (cond (symbol? spec)
+  (cond (keyword? spec)
         `(fn [~arg]
-           (. ~arg ~spec))
-        (keyword? spec)
+           (. ~arg ~(symbol (name spec))))
+        (symbol? spec)
         `(fn [~arg]
-           (~(symbol (name spec)) ~arg))
+           (~spec ~arg))
         (and (seq? spec) (#{'-> '->>} (first spec)))
         `(fn [~arg]
-           (~(first spec) (. ~arg ~(second spec)) ~@(nnext spec)))))
+           (~(first spec)
+            ~(if (keyword? (second spec))
+               `(. ~arg ~(symbol (name (second spec))))
+               `(~(first spec) ~arg ~(second spec)))
+            ~@(nnext spec)))))
 
 (defmacro defextractors [name hint & exts]
   (let [arg (with-meta (gensym "item") {:tag hint})]
