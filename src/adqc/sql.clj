@@ -97,11 +97,11 @@
   (attributes [self])
   (rename-attributes [self m]))
 
-(defrecord ArithmeticOperator [n f]
+(defrecord InfixOperator [n]
   ToSQL
   (to-sql [self] n))
 
-(defrecord ArithmeticOperatorExpression [op x y]
+(defrecord InfixOperatorExpression [op x y]
   ToSQL
   (to-sql [self] (apply str (interpose " " (map to-sql x op y))))
   SQLExpression
@@ -111,7 +111,7 @@
               (attributes y)))
   (rename-attributes
    [self m]
-   (ArithmeticExpression.
+   (InfixOperatorExpression.
     op
     (rename-attributes x m)
     (rename-attributes y m))))
@@ -145,25 +145,69 @@
 (def node-type-numbers
      {15 ::antlr-function
       18 ::antlr-tablecolumn
-      30 ::antlr-id})
+      30 ::antlr-id
+      31 ::antlr-int
+      49 ::antlr-star
+      65 ::antlr-infix-plus
+      66 ::antlr-infix-minus
+      67 ::antlr-infix-div})
 
 (defmulti transform-node (comp node-type-numbers :ntype))
 
+(defmacro deftn [dispatch-val children-pat & body]
+  `(defmethod transform-node ~dispatch-val
+     [{~children-pat :children}]
+     ~@body))
+
 (defmethod transform-node nil [token] token)
 
+(deftn ::antlr-function [f & args]
+  (FunctionApplicationExpression. f args))
+
+#_
 (defmethod transform-node ::antlr-function
   [{[f & args] :children}]
   (FunctionApplicationExpression. f args))
 
 ;;; do I want to haul some context around
 ;;; (to be queried for the source of an attribute etc.)?
+(deftn ::antlr-tablecolumn children
+  (if (next children)
+    (Attribute. (second children) (first children) nil)
+    (Attribute. (first children) nil nil)))
+
+#_
 (defmethod transform-node ::antlr-tablecolumn
   [{children :children}]
   (if (next children)
     (Attribute. (second children) (first children) nil)
     (Attribute. (first children) nil nil)))
 
+(defmacro deftin [dispatch-val op]
+  `(deftn ~dispatch-val [x# y#]
+     (InfixOperatorExpression. (InfixOperator. ~(str op)) x# y#)))
+
+(deftin ::antlr-infix-plus +)
+(deftin ::antlr-infix-minus -)
+(deftin ::antlr-infix-div /)
+
+#_
+(defmethod transform-node ::antlr-infix-plus
+  [{[x y] :children}]
+  (InfixOperatorExpression. (InfixOperator. "+") x y))
+
+#_
+(defmethod transform-node ::antlr-infix-minus
+  [{[x y] :children}]
+  (InfixOperatorExpression. (InfixOperator. "-") x y))
+
+#_
+(defmethod transform-node ::antlr-infix-div
+  [{[x y] :children}]
+  (InfixOperatorExpression. (InfixOperator. "/") x y))
+
 (defmethod transform-node ::antlr-id [{text :text}] text)
+(defmethod transform-node ::antlr-int [{text :text}] (BigInteger. text))
 
 ;;; Clojure maps and vectors will only occur here where antlr->clojure
 ;;; constructs them, so I'm free to use map? and vector? to determine
