@@ -1,8 +1,12 @@
 (ns adqc.sql
   (:use [adqc.util :only [defextractors extract-info]]
-        [clojure.zip :as zip :only []]
-        [clojure.walk :as walk :only []]
-        [clojure.contrib.string :as str :only []])
+        [clojure
+         [zip :as zip :only []]
+         [walk :as walk :only []]
+         [set :as set :only []]]
+        [clojure.contrib
+         [string :as str :only []]
+         [def :only [defalias]]])
   (:import uk.org.ogsadai.parser.sql92query.SQLQueryParser
            org.antlr.runtime.tree.CommonTree
            org.antlr.runtime.CommonToken))
@@ -20,6 +24,7 @@
     (.parseSQLForLiteral sql-query-parser sql))
   (defn antlr-parse-value-expression-or-star [sql]
     (.parseSQLForValueExpressionOrStar sql-query-parser sql))
+  (defalias antlr-parse-expression antlr-parse-value-expression-or-star)
   
   (defn antlr-generate-sql [ast]
     (.generateSQL sql-query-parser ast))
@@ -78,6 +83,107 @@
   (antlr->clojure [self] (extract-info node-info-extractors self))
   CommonToken
   (antlr->clojure [self] (extract-info token-info-extractors self)))
+
+(defprotocol ToSQL
+  (to-sql [self]))
+
+(extend-protocol ToSQL
+  String
+  (to-sql [self] (str/escape char-escape-string self)) ; inadequate...?
+  Number
+  (to-sql [self] (str self)))
+
+(defprotocol SQLExpression
+  (attributes [self])
+  (rename-attributes [self m]))
+
+(defrecord ArithmeticOperator [n f]
+  ToSQL
+  (to-sql [self] n))
+
+(defrecord ArithmeticOperatorExpression [op x y]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map to-sql x op y))))
+  SQLExpression
+  (attributes
+   [self]
+   (set/union (attributes x)
+              (attributes y)))
+  (rename-attributes
+   [self m]
+   (ArithmeticExpression.
+    op
+    (rename-attributes x m)
+    (rename-attributes y m))))
+
+(defrecord FunctionApplicationExpression [fn args]
+  ToSQL
+  (to-sql
+   [self]
+   (str (to-sql fn)
+        "(" (apply str (interpose ", " (map to-sql args))) ")"))
+  SQLExpression
+  (attributes [self] (apply set/union (map attributes args)))
+  (rename-attributes
+   [self m]
+   (vec (map (partial rename-attributes m) args))))
+
+(defrecord Attribute [id src t]
+  ToSQL
+  (to-sql
+   [self]
+   (if src (str src "." id) id))
+  SQLExpression
+  (attributes [self] #{self})
+  (rename-attributes
+   [self m]
+   (if-let [new-id (m id)]
+     (Attribute. new-id src t)
+     self)))
+
+;;; this strikes me as less then satisfactory
+(def node-type-numbers
+     {15 ::antlr-function
+      18 ::antlr-tablecolumn
+      30 ::antlr-id})
+
+(defmulti transform-node (comp node-type-numbers :ntype))
+
+(defmethod transform-node nil [token] token)
+
+(defmethod transform-node ::antlr-function
+  [{[f & args] :children}]
+  (FunctionApplicationExpression. f args))
+
+;;; do I want to haul some context around
+;;; (to be queried for the source of an attribute etc.)?
+(defmethod transform-node ::antlr-tablecolumn
+  [{children :children}]
+  (if (next children)
+    (Attribute. (second children) (first children) nil)
+    (Attribute. (first children) nil nil)))
+
+(defmethod transform-node ::antlr-id [{text :text}] text)
+
+;;; Clojure maps and vectors will only occur here where antlr->clojure
+;;; constructs them, so I'm free to use map? and vector? to determine
+;;; whether I'm changing something in postwalk.
+(defn transform-ast [ast]
+  (walk/postwalk
+   (fn [item]
+     (cond (map? item) (transform-node item)
+           ;; vec necessary (because clojure.lang.MapEntry satisfies vector?)
+           ;; -- I wonder if there is potential for breakage that I can't see
+           (vector? item) (vec (map transform-node item))
+           :else item))
+   ast))
+
+(comment
+  (= (to-sql (-> "f(foo.bar)"
+                 antlr-parse-expression
+                 antlr->clojure
+                 transform-ast))
+     "f(foo.bar)"))
 
 #_
 (defn parse-sql
