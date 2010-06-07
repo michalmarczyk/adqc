@@ -86,7 +86,9 @@
 
 (extend-protocol ToSQL
   String
-  (to-sql [self] (str/escape char-escape-string self)) ; inadequate...?
+  ;; no escaping done by me -- I'm dealing with SQL queries which should
+  ;; have well-prepared strings!
+  (to-sql [self] self)
   Number
   (to-sql [self] (str self)))
 
