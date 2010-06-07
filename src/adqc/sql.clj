@@ -88,13 +88,21 @@
   String
   ;; no escaping done by me -- I'm dealing with SQL queries which should
   ;; have well-prepared strings!
-  (to-sql [self] self)
+  (to-sql [self] (str \' self \'))
   Number
   (to-sql [self] (str self)))
 
 (defprotocol SQLExpression
   (attributes [self])
   (rename-attributes [self m]))
+
+(extend-protocol SQLExpression
+  String
+  (attributes [_] #{})
+  (rename-attributes [self _] self)
+  Number
+  (attributes [_] #{})
+  (rename-attributes [self _] self))
 
 (defrecord InfixOperator [n]
   ToSQL
@@ -151,12 +159,22 @@
 (def node-type-numbers
      {15 ::antlr-function
       18 ::antlr-tablecolumn
+      23 ::antlr-is-null
       30 ::antlr-id
       31 ::antlr-int
       49 ::antlr-star
       65 ::antlr-infix-plus
       66 ::antlr-infix-minus
-      67 ::antlr-infix-div})
+      67 ::antlr-infix-div
+      84 ::antlr-between
+      86 ::antlr-=
+      87 ::antlr-<>
+      88 ::antlr-!=
+      89 ::antlr-<
+      90 ::antlr->
+      91 ::antlr->=
+      92 ::antlr-<=
+      95 ::antlr-like})
 
 ;;; do I want to haul some context around
 ;;; (to be queried for the source of an attribute etc.)?
