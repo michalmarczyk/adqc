@@ -11,30 +11,27 @@
            org.antlr.runtime.tree.CommonTree
            org.antlr.runtime.CommonToken))
 
-(let [sql-query-parser (SQLQueryParser/getInstance)]
-  
-  (defn antlr-parse-sql [sql]
-    (.parseSQL sql-query-parser sql))
-  
-  (defn antlr-parse-condition [sql]
-    (.parseSQLForCondition sql-query-parser sql))
-  (defn antlr-parse-derived-column [sql]
-    (.parseSQLForDerivedColumn sql-query-parser sql))
-  (defn antlr-parse-literal [sql]
-    (.parseSQLForLiteral sql-query-parser sql))
-  (defn antlr-parse-value-expression-or-star [sql]
-    (.parseSQLForValueExpressionOrStar sql-query-parser sql))
-  (defalias antlr-parse-expression antlr-parse-value-expression-or-star)
-  
-  (defn antlr-generate-sql [ast]
-    (.generateSQL sql-query-parser ast))
+(defmacro defantlrparsers [& m&fs]
+  `(let ~'[sql-query-parser (SQLQueryParser/getInstance)]
+     ~@(for [[method-suffix fn-suffix]
+             (into {} (map vec (partition 2 m&fs)))]
+         `(defn ~(symbol (str "antlr-parse-" fn-suffix))
+            ~(str "Parses the given SQL string with the "
+                  "parseSQL" method-suffix
+                  " method of the ANTLR-based praser.")
+            [~'sql]
+            (. ~'sql-query-parser
+               ~(symbol (str "parseSQL" method-suffix))
+               ~'sql)))))
 
-  (defn antlr-generate-condition [ast]
-    (.generateSQLForCondition sql-query-parser ast))
-  (defn antlr-generate-query [ast]
-    (.generateSQLForQuery sql-query-parser ast))
-  (defn antlr-generate-value-expression-or-star [ast]
-    (.generateSQLForValueExpressionOrStar sql-query-parser ast)))
+(defantlrparsers
+  ""                       sql
+  ForCondition             condition
+  ForDerivedColumn         derived-column
+  ForLiteral               literal
+  ForValueExpressionOrStar value-expression-or-star)
+
+(defalias antlr-parse-expression antlr-parse-value-expression-or-star)
 
 (defn antlr-ast-zip
   [root]
@@ -59,7 +56,7 @@
 
 (defextractors token-info-extractors CommonToken
   :ttype :type
-  :text :text)
+  :text  :text)
 
 (defn node-children [^CommonTree node]
   (let [cnt (.getChildCount node)]
@@ -72,10 +69,10 @@
         children))))
 
 (defextractors node-info-extractors CommonTree
-  :ntype :type
-  :nkey (->> :text (str/replace-re #"_" "-") (str/lower-case) keyword)
-  :token (-> :token antlr->clojure)
-  :text :text
+  :ntype    :type
+  :nkey     (->> :text (str/replace-re #"_" "-") (str/lower-case) keyword)
+  :token    (-> :token antlr->clojure)
+  :text     :text
   :children node-children)
 
 (extend-protocol ANTLR->Clojure
@@ -141,6 +138,13 @@
      (Attribute. new-id src t)
      self)))
 
+(defrecord ColumnStar []
+  ToSQL
+  (to-sql [self] "*")
+  SQLExpression
+  (attributes [self] #{})
+  (rename-attributes [self _] self))
+
 ;;; this strikes me as less then satisfactory
 (def node-type-numbers
      {15 ::antlr-function
@@ -152,6 +156,9 @@
       66 ::antlr-infix-minus
       67 ::antlr-infix-div})
 
+;;; do I want to haul some context around
+;;; (to be queried for the source of an attribute etc.)?
+;;; NB. a context argument could be used to disambiguate stars
 (defmulti transform-node (comp node-type-numbers :ntype))
 
 (defmacro deftn [dispatch-val children-pat & body]
@@ -164,21 +171,7 @@
 (deftn ::antlr-function [f & args]
   (FunctionApplicationExpression. f args))
 
-#_
-(defmethod transform-node ::antlr-function
-  [{[f & args] :children}]
-  (FunctionApplicationExpression. f args))
-
-;;; do I want to haul some context around
-;;; (to be queried for the source of an attribute etc.)?
 (deftn ::antlr-tablecolumn children
-  (if (next children)
-    (Attribute. (second children) (first children) nil)
-    (Attribute. (first children) nil nil)))
-
-#_
-(defmethod transform-node ::antlr-tablecolumn
-  [{children :children}]
   (if (next children)
     (Attribute. (second children) (first children) nil)
     (Attribute. (first children) nil nil)))
@@ -191,23 +184,13 @@
 (deftin ::antlr-infix-minus -)
 (deftin ::antlr-infix-div /)
 
-#_
-(defmethod transform-node ::antlr-infix-plus
-  [{[x y] :children}]
-  (InfixOperatorExpression. (InfixOperator. "+") x y))
-
-#_
-(defmethod transform-node ::antlr-infix-minus
-  [{[x y] :children}]
-  (InfixOperatorExpression. (InfixOperator. "-") x y))
-
-#_
-(defmethod transform-node ::antlr-infix-div
-  [{[x y] :children}]
-  (InfixOperatorExpression. (InfixOperator. "/") x y))
-
 (defmethod transform-node ::antlr-id [{text :text}] text)
 (defmethod transform-node ::antlr-int [{text :text}] (BigInteger. text))
+
+(deftn ::antlr-star children
+  (if-let [[x y] children]
+    (InfixOperatorExpression. (InfixOperator. "*") x y)
+    (ColumnStar.)))
 
 ;;; Clojure maps and vectors will only occur here where antlr->clojure
 ;;; constructs them, so I'm free to use map? and vector? to determine
@@ -222,16 +205,21 @@
            :else item))
    ast))
 
-(comment
-  (= (to-sql (-> "f(foo.bar)"
-                 antlr-parse-expression
-                 antlr->clojure
-                 transform-ast))
-     "f(foo.bar)"))
+(defmacro defparsefns [& s&ts]
+  `(do ~@(for [[suffix text-type] (into {} (map vec (partition 2 s&ts)))
+               :let [fn-name (str "parse-" suffix)]]
+           `(defn ~(symbol fn-name)
+              ~(str "Parses the given " text-type " with OGSA-DAI's ANTLR-based\n"
+                    "parser and converts the result to a Clojure tree.")
+              [~'sql]
+              (-> ~'sql
+                  ~(symbol (str "antlr-" fn-name))
+                  antlr->clojure
+                  transform-ast)))))
 
-#_
-(defn parse-sql
-  "Parses the given SQL with OGSA-DAI's ANTLR-based parser
-  and converts the result to a Clojure tree."
-  [sql]
-  )
+(defparsefns
+  sql            "SQL"
+  expression     "SQL expression"
+  condition      "SQL predicate"
+  literal        "SQL literal"
+  derived-column "SQL derived column")
