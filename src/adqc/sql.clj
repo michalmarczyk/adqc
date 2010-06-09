@@ -88,7 +88,7 @@
   String
   ;; no escaping done by me -- I'm dealing with SQL queries which should
   ;; have well-prepared strings!
-  (to-sql [self] (str \' self \'))
+  (to-sql [self] self)
   Number
   (to-sql [self] (str self)))
 
@@ -108,27 +108,26 @@
   ToSQL
   (to-sql [self] n))
 
-(defrecord InfixOperatorExpression [op x y]
+(defrecord InfixOperatorExpression [op lhs rhs]
   ToSQL
-  (to-sql [self] (apply str (interpose " " (map to-sql x op y))))
+  (to-sql [self] (apply str (interpose " " (map to-sql [lhs op rhs]))))
   SQLExpression
   (attributes
    [self]
-   (set/union (attributes x)
-              (attributes y)))
+   (set/union (attributes lhs)
+              (attributes rhs)))
   (rename-attributes
    [self m]
    (InfixOperatorExpression.
     op
-    (rename-attributes x m)
-    (rename-attributes y m))))
+    (rename-attributes lhs m)
+    (rename-attributes rhs m))))
 
 (defrecord FunctionApplicationExpression [fn args]
   ToSQL
   (to-sql
    [self]
-   (str (to-sql fn)
-        "(" (apply str (interpose ", " (map to-sql args))) ")"))
+   (str fn "(" (apply str (interpose ", " (map to-sql args))) ")"))
   SQLExpression
   (attributes [self] (apply set/union (map attributes args)))
   (rename-attributes
@@ -155,17 +154,88 @@
   (attributes [self] #{})
   (rename-attributes [self _] self))
 
+(defrecord InfixPredicate [n]
+  ToSQL
+  (to-sql [self] n))
+
+(defrecord InfixPredicateExpression [pred lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map to-sql [lhs pred rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (InfixPredicateExpression.
+    pred
+    (rename-attributes lhs m)
+    (rename-attributes rhs m))))
+
+(defmulti parenthesise type)
+
+(defmethod parenthesise ::compound-predicate
+  [expr] (str "(" (to-sql expr) ")"))
+(defmethod parenthesise :default
+  [expr] (to-sql expr))
+
+(defrecord PredicateConjunctionExpression [lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "AND" rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (PredicateConjunctionExpression. (rename-attributes lhs m)
+                                    (rename-attributes rhs m))))
+
+(derive PredicateConjunctionExpression ::compound-predicate)
+
+(defrecord PredicateDisjunctionExpression [lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "OR" rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (PredicateDisjunctionExpression. (rename-attributes lhs m)
+                                    (rename-attributes rhs m))))
+
+(derive PredicateDisjunctionExpression ::compound-predicate)
+
+(defrecord PredicateNegationExpression [arg]
+  ToSQL
+  (to-sql [self] (str "NOT " (parenthesise arg)))
+  SQLExpression
+  (attributes [self] (attributes arg))
+  (rename-attributes
+   [self m]
+   (PredicateNegationExpression. (rename-attributes arg m))))
+
+(derive PredicateNegationExpression ::compound-predicate)
+
+(defrecord IsNullExpression [col]
+  ToSQL
+  (to-sql [self] (str (to-sql col) " IS NULL"))
+  SQLExpression
+  (attributes [self] (attributes col))
+  (rename-attributes
+   [self m]
+   (IsNullExpression. (rename-attributes col m))))
+
 ;;; this strikes me as less then satisfactory
 (def node-type-numbers
      {15 ::antlr-function
+      16 ::antlr-not
       18 ::antlr-tablecolumn
       23 ::antlr-is-null
       30 ::antlr-id
       31 ::antlr-int
+      34 ::antlr-string
       49 ::antlr-star
       65 ::antlr-infix-plus
       66 ::antlr-infix-minus
       67 ::antlr-infix-div
+      79 ::antlr-or
+      80 ::antlr-and
       84 ::antlr-between
       86 ::antlr-=
       87 ::antlr-<>
@@ -196,16 +266,43 @@
     (Attribute. (second children) (first children) nil)
     (Attribute. (first children) nil nil)))
 
-(defmacro deftin [dispatch-val op]
-  `(deftn ~dispatch-val [x# y#]
-     (InfixOperatorExpression. (InfixOperator. ~(str op)) x# y#)))
+(defmacro deftion [dispatch-val op]
+  `(deftn ~dispatch-val [lhs# rhs#]
+     (InfixOperatorExpression. (InfixOperator. ~(str op)) lhs# rhs#)))
 
-(deftin ::antlr-infix-plus +)
-(deftin ::antlr-infix-minus -)
-(deftin ::antlr-infix-div /)
+(deftion ::antlr-infix-plus +)
+(deftion ::antlr-infix-minus -)
+(deftion ::antlr-infix-div /)
 
-(defmethod transform-node ::antlr-id [{text :text}] text)
+(defmacro deftipn [dispatch-val pred]
+  `(deftn ~dispatch-val [lhs# rhs#]
+     (InfixPredicateExpression. (InfixPredicate. ~(str pred)) lhs# rhs#)))
+
+(deftipn ::antlr-= =)
+(deftipn ::antlr-< <)
+(deftipn ::antlr-> >)
+(deftipn ::antlr-<= <=)
+(deftipn ::antlr->= >=)
+(deftipn ::antlr-!= !=)
+(deftipn ::antlr-<> <>)
+(deftipn ::antlr-like LIKE)
+
+(deftn ::antlr-is-null [col] (IsNullExpression. col))
+
+(deftn ::antlr-and [lhs rhs] (PredicateConjunctionExpression. lhs rhs))
+(deftn ::antlr-or  [lhs rhs] (PredicateDisjunctionExpression. lhs rhs))
+(deftn ::antlr-not [arg]     (PredicateNegationExpression.    arg))
+
+;;; do I want to have a separate Between record instead?
+(deftn ::antlr-between [attr low high]
+  (let [leq (InfixPredicate. "<=")]
+    (PredicateConjunctionExpression.
+     (InfixPredicateExpression. leq low attr)
+     (InfixPredicateExpression. leq attr high))))
+
+(defmethod transform-node ::antlr-id [{text :text}] text) ; is this ok?
 (defmethod transform-node ::antlr-int [{text :text}] (BigInteger. text))
+(defmethod transform-node ::antlr-string [{text :text}] text)
 
 (deftn ::antlr-star children
   (if-let [[x y] children]
