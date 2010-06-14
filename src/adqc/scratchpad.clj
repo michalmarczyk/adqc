@@ -83,3 +83,110 @@
 
 ;;; I could add an extra "context" argument to the transform-node
 ;;; multimethod; it could be used to disambiguate stars etc.
+
+;;; original defrecord forms...
+
+#_
+(defrecord InfixOperatorExpression [op lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map to-sql [lhs op rhs]))))
+  SQLExpression
+  (attributes
+   [self]
+   (set/union (attributes lhs)
+              (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (InfixOperatorExpression.
+    op
+    (rename-attributes lhs m)
+    (rename-attributes rhs m))))
+
+#_
+(defrecord FunctionApplicationExpression [fn args]
+  ToSQL
+  (to-sql
+   [self]
+   (str fn "(" (apply str (interpose ", " (map to-sql args))) ")"))
+  SQLExpression
+  (attributes [self] (apply set/union (map attributes args)))
+  (rename-attributes
+   [self m]
+   (vec (map (partial rename-attributes m) args))))
+
+#_
+(defrecord Attribute [id src t]
+  ToSQL
+  (to-sql
+   [self]
+   (if src (str src "." id) id))
+  SQLExpression
+  (attributes [self] #{self})
+  (rename-attributes
+   [self m]
+   (if-let [new-id (m id)]
+     (Attribute. new-id src t)
+     self)))
+
+#_
+(defrecord ColumnStar []
+  ToSQL
+  (to-sql [self] "*")
+  SQLExpression
+  (attributes [self] #{})
+  (rename-attributes [self _] self))
+
+#_
+(defrecord InfixPredicateExpression [pred lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map to-sql [lhs pred rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (InfixPredicateExpression.
+    pred
+    (rename-attributes lhs m)
+    (rename-attributes rhs m))))
+
+#_
+(defrecord PredicateConjunctionExpression [lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "AND" rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (PredicateConjunctionExpression. (rename-attributes lhs m)
+                                    (rename-attributes rhs m))))
+
+#_
+(defrecord PredicateDisjunctionExpression [lhs rhs]
+  ToSQL
+  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "OR" rhs]))))
+  SQLExpression
+  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
+  (rename-attributes
+   [self m]
+   (PredicateDisjunctionExpression. (rename-attributes lhs m)
+                                    (rename-attributes rhs m))))
+
+#_
+(defrecord PredicateNegationExpression [arg]
+  ToSQL
+  (to-sql [self] (str "NOT " (parenthesise arg)))
+  SQLExpression
+  (attributes [self] (attributes arg))
+  (rename-attributes
+   [self m]
+   (PredicateNegationExpression. (rename-attributes arg m))))
+
+#_
+(defrecord IsNullExpression [col]
+  ToSQL
+  (to-sql [self] (str (to-sql col) " IS NULL"))
+  SQLExpression
+  (attributes [self] (attributes col))
+  (rename-attributes
+   [self m]
+   (IsNullExpression. (rename-attributes col m))))

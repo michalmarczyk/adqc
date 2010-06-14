@@ -1,7 +1,7 @@
 (ns test-sql
   (:use clojure.test)
-  (:use adqc.sql)
-  (:import adqc.sql.Attribute))
+  (:use [adqc sql]
+        [adqc.sql records protocols]))
 
 (deftest test-roundtripping-arithmetic-expressions
   (are [sql]
@@ -37,17 +37,17 @@
 (deftest test-attributes
   (are [expr attrs]
        (= (-> expr parse-expression attributes) attrs)
-       "foo" #{(adqc.sql.Attribute. "foo" nil nil)}
-       "foo.bar + quux" #{(Attribute. "bar" "foo" nil)
-                          (Attribute. "quux" nil nil)})
+       "foo" #{(attribute "foo" nil nil)}
+       "foo.bar + quux" #{(attribute "bar" "foo" nil)
+                          (attribute "quux" nil nil)})
   (are [pred attrs]
        (= (-> pred parse-condition attributes) attrs)
-       "foo.bar < quux" #{(Attribute. "bar" "foo" nil)
-                          (Attribute. "quux" nil nil)}
+       "foo.bar < quux" #{(attribute "bar" "foo" nil)
+                          (attribute "quux" nil nil)}
        "foo < bar AND baz.quux LIKE '%asdf'"
-       #{(Attribute. "foo" nil nil)
-         (Attribute. "bar" nil nil)
-         (Attribute. "quux" "baz" nil)}))
+       #{(attribute "foo" nil nil)
+         (attribute "bar" nil nil)
+         (attribute "quux" "baz" nil)}))
 
 (deftest test-rename-attributes
   (are [expr expr* m]

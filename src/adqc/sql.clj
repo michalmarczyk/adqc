@@ -1,11 +1,12 @@
 (ns adqc.sql
-  (:use [adqc.util :only [defextractors extract-info]]
+  (:use [adqc.sql protocols records]
         [clojure
          [zip :as zip :only []]
          [walk :as walk :only []]
-         [set :as set :only []]]
+         [set :as set :only []]
+         [string :as str :only []]]
         [clojure.contrib
-         [string :as str :only []]
+         #_[string :as cstr :only []]
          [def :only [defalias]]])
   (:import uk.org.ogsadai.parser.sql92query.SQLQueryParser
            org.antlr.runtime.tree.CommonTree
@@ -51,176 +52,6 @@
                   "adding nodes to ANTLR AST zipper not supported")))
               root))
 
-(defprotocol ANTLR->Clojure
-  (antlr->clojure [self]))
-
-(defextractors token-info-extractors CommonToken
-  :ttype :type
-  :text  :text)
-
-(defn node-children [^CommonTree node]
-  (let [cnt (.getChildCount node)]
-    (loop [i 0 children []]
-      (if (< i cnt)
-        (recur (inc i)
-               (conj children
-                     (-> (.getChild node i)
-                         antlr->clojure)))
-        children))))
-
-(defextractors node-info-extractors CommonTree
-  :ntype    :type
-  :nkey     (->> :text (str/replace-re #"_" "-") (str/lower-case) keyword)
-  :token    (-> :token antlr->clojure)
-  :text     :text
-  :children node-children)
-
-(extend-protocol ANTLR->Clojure
-  CommonTree
-  (antlr->clojure [self] (extract-info node-info-extractors self))
-  CommonToken
-  (antlr->clojure [self] (extract-info token-info-extractors self)))
-
-(defprotocol ToSQL
-  (to-sql [self]))
-
-(extend-protocol ToSQL
-  String
-  ;; no escaping done by me -- I'm dealing with SQL queries which should
-  ;; have well-prepared strings!
-  (to-sql [self] self)
-  Number
-  (to-sql [self] (str self)))
-
-(defprotocol SQLExpression
-  (attributes [self])
-  (rename-attributes [self m]))
-
-(extend-protocol SQLExpression
-  String
-  (attributes [_] #{})
-  (rename-attributes [self _] self)
-  Number
-  (attributes [_] #{})
-  (rename-attributes [self _] self))
-
-(defrecord InfixOperator [n]
-  ToSQL
-  (to-sql [self] n))
-
-(defrecord InfixOperatorExpression [op lhs rhs]
-  ToSQL
-  (to-sql [self] (apply str (interpose " " (map to-sql [lhs op rhs]))))
-  SQLExpression
-  (attributes
-   [self]
-   (set/union (attributes lhs)
-              (attributes rhs)))
-  (rename-attributes
-   [self m]
-   (InfixOperatorExpression.
-    op
-    (rename-attributes lhs m)
-    (rename-attributes rhs m))))
-
-(defrecord FunctionApplicationExpression [fn args]
-  ToSQL
-  (to-sql
-   [self]
-   (str fn "(" (apply str (interpose ", " (map to-sql args))) ")"))
-  SQLExpression
-  (attributes [self] (apply set/union (map attributes args)))
-  (rename-attributes
-   [self m]
-   (vec (map (partial rename-attributes m) args))))
-
-(defrecord Attribute [id src t]
-  ToSQL
-  (to-sql
-   [self]
-   (if src (str src "." id) id))
-  SQLExpression
-  (attributes [self] #{self})
-  (rename-attributes
-   [self m]
-   (if-let [new-id (m id)]
-     (Attribute. new-id src t)
-     self)))
-
-(defrecord ColumnStar []
-  ToSQL
-  (to-sql [self] "*")
-  SQLExpression
-  (attributes [self] #{})
-  (rename-attributes [self _] self))
-
-(defrecord InfixPredicate [n]
-  ToSQL
-  (to-sql [self] n))
-
-(defrecord InfixPredicateExpression [pred lhs rhs]
-  ToSQL
-  (to-sql [self] (apply str (interpose " " (map to-sql [lhs pred rhs]))))
-  SQLExpression
-  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
-  (rename-attributes
-   [self m]
-   (InfixPredicateExpression.
-    pred
-    (rename-attributes lhs m)
-    (rename-attributes rhs m))))
-
-(defmulti parenthesise type)
-
-(defmethod parenthesise ::compound-predicate
-  [expr] (str "(" (to-sql expr) ")"))
-(defmethod parenthesise :default
-  [expr] (to-sql expr))
-
-(defrecord PredicateConjunctionExpression [lhs rhs]
-  ToSQL
-  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "AND" rhs]))))
-  SQLExpression
-  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
-  (rename-attributes
-   [self m]
-   (PredicateConjunctionExpression. (rename-attributes lhs m)
-                                    (rename-attributes rhs m))))
-
-(derive PredicateConjunctionExpression ::compound-predicate)
-
-(defrecord PredicateDisjunctionExpression [lhs rhs]
-  ToSQL
-  (to-sql [self] (apply str (interpose " " (map parenthesise [lhs "OR" rhs]))))
-  SQLExpression
-  (attributes [self] (set/union (attributes lhs) (attributes rhs)))
-  (rename-attributes
-   [self m]
-   (PredicateDisjunctionExpression. (rename-attributes lhs m)
-                                    (rename-attributes rhs m))))
-
-(derive PredicateDisjunctionExpression ::compound-predicate)
-
-(defrecord PredicateNegationExpression [arg]
-  ToSQL
-  (to-sql [self] (str "NOT " (parenthesise arg)))
-  SQLExpression
-  (attributes [self] (attributes arg))
-  (rename-attributes
-   [self m]
-   (PredicateNegationExpression. (rename-attributes arg m))))
-
-(derive PredicateNegationExpression ::compound-predicate)
-
-(defrecord IsNullExpression [col]
-  ToSQL
-  (to-sql [self] (str (to-sql col) " IS NULL"))
-  SQLExpression
-  (attributes [self] (attributes col))
-  (rename-attributes
-   [self m]
-   (IsNullExpression. (rename-attributes col m))))
-
 ;;; this strikes me as less then satisfactory
 (def node-type-numbers
      {15 ::antlr-function
@@ -259,16 +90,16 @@
 (defmethod transform-node nil [token] token)
 
 (deftn ::antlr-function [f & args]
-  (FunctionApplicationExpression. f args))
+  (function-application-expression f args))
 
 (deftn ::antlr-tablecolumn children
   (if (next children)
-    (Attribute. (second children) (first children) nil)
-    (Attribute. (first children) nil nil)))
+    (attribute (second children) (first children) nil)
+    (attribute (first children) nil nil)))
 
 (defmacro deftion [dispatch-val op]
   `(deftn ~dispatch-val [lhs# rhs#]
-     (InfixOperatorExpression. (InfixOperator. ~(str op)) lhs# rhs#)))
+     (infix-operator-expression (infix-operator ~(str op)) lhs# rhs#)))
 
 (deftion ::antlr-infix-plus +)
 (deftion ::antlr-infix-minus -)
@@ -276,7 +107,7 @@
 
 (defmacro deftipn [dispatch-val pred]
   `(deftn ~dispatch-val [lhs# rhs#]
-     (InfixPredicateExpression. (InfixPredicate. ~(str pred)) lhs# rhs#)))
+     (infix-predicate-expression (infix-predicate ~(str pred)) lhs# rhs#)))
 
 (deftipn ::antlr-= =)
 (deftipn ::antlr-< <)
@@ -287,18 +118,18 @@
 (deftipn ::antlr-<> <>)
 (deftipn ::antlr-like LIKE)
 
-(deftn ::antlr-is-null [col] (IsNullExpression. col))
+(deftn ::antlr-is-null [col] (is-null-expression col))
 
-(deftn ::antlr-and [lhs rhs] (PredicateConjunctionExpression. lhs rhs))
-(deftn ::antlr-or  [lhs rhs] (PredicateDisjunctionExpression. lhs rhs))
-(deftn ::antlr-not [arg]     (PredicateNegationExpression.    arg))
+(deftn ::antlr-and [lhs rhs] (and-expression lhs rhs))
+(deftn ::antlr-or  [lhs rhs] (or-expression lhs rhs))
+(deftn ::antlr-not [pred]    (negation-expression pred))
 
 ;;; do I want to have a separate Between record instead?
 (deftn ::antlr-between [attr low high]
-  (let [leq (InfixPredicate. "<=")]
-    (PredicateConjunctionExpression.
-     (InfixPredicateExpression. leq low attr)
-     (InfixPredicateExpression. leq attr high))))
+  (let [leq (infix-predicate "<=")]
+    (and-expression
+     (infix-predicate-expression leq low attr)
+     (infix-predicate-expression leq attr high))))
 
 (defmethod transform-node ::antlr-id [{text :text}] text) ; is this ok?
 (defmethod transform-node ::antlr-int [{text :text}] (BigInteger. text))
@@ -306,9 +137,8 @@
 
 (deftn ::antlr-star children
   (if-let [[x y] children]
-    (InfixOperatorExpression. (InfixOperator. "*") x y)
-    (ColumnStar.)))
-
+    (infix-operator-expression (infix-operator "*") x y)
+    (column-star)))
 ;;; Clojure maps and vectors will only occur here where antlr->clojure
 ;;; constructs them, so I'm free to use map? and vector? to determine
 ;;; whether I'm changing something in postwalk.
