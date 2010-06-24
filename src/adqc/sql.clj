@@ -54,7 +54,14 @@
 
 ;;; this strikes me as less then satisfactory
 (def node-type-numbers
-     {15 ::antlr-function
+     {4  ::antlr-statement
+      5  ::antlr-query
+      8  ::antlr-select-list
+      9  ::antlr-from-list
+      10 ::antlr-where
+      13 ::antlr-relation
+      14 ::antlr-column
+      15 ::antlr-function
       16 ::antlr-not
       18 ::antlr-tablecolumn
       23 ::antlr-is-null
@@ -139,6 +146,18 @@
   (if-let [[x y] children]
     (infix-operator-expression (infix-operator "*") x y)
     (column-star)))
+
+(deftn ::antlr-column [attr & [as]]
+  (column-expression attr as))
+
+(deftn ::antlr-select-list [& cols] (select-list cols))
+(deftn ::antlr-from-list [& sources] (from-list sources))
+(deftn ::antlr-relation [id & [as]] (relation-expression id as))
+(deftn ::antlr-where [pred] (where pred))
+(deftn ::antlr-query [select-list from-list where]
+  (sql-query select-list from-list where))
+(deftn ::antlr-statement [query] (sql-statement query))
+
 ;;; Clojure maps and vectors will only occur here where antlr->clojure
 ;;; constructs them, so I'm free to use map? and vector? to determine
 ;;; whether I'm changing something in postwalk.

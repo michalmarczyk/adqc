@@ -137,3 +137,53 @@
   (attributes [self] (attributes col))
   (rename-attributes [self m]
     (is-null-expression (rename-attributes col m))))
+
+;;; TODO:
+;;; What should rename-attributes on a column with AS actually do?
+(defexpression column-expression [attr as]
+  (to-sql [self] (str (to-sql attr) (when as (str " AS " as))))
+  (attributes [self] #{attr})
+  (rename-attributes [self m]
+    (column-expression (rename-attributes attr m) as)))
+
+(defexpression select-list [cols]
+  (to-sql [self]
+    (apply str (cons "SELECT " (interpose " " (map to-sql cols)))))
+  (attributes [self] (apply set/union (map attributes cols)))
+  (rename-attributes [self m]
+    (select-list (map #(rename-attributes % m) cols))))
+
+(defexpression from-list [sources]
+  (to-sql [self]
+    (apply str (cons "FROM " (interpose " " (map to-sql sources)))))
+  (attributes [self]
+    (apply set/union (map attributes sources)))
+  (rename-attributes [self m]
+    (from-list (map #(rename-attributes % m) sources))))
+
+;;; TODO:
+;;; Hopefully this token type is not being reused for multiple purposes...
+(defexpression relation-expression [id as]
+  (to-sql [self]
+    (str id (when as (str " AS " as))))
+  (attributes [self] #{})
+  (rename-attributes [self _] self))
+
+(defexpression where [pred]
+  (to-sql [self] (str "WHERE " (to-sql pred)))
+  (attributes [self] (attributes pred))
+  (rename-attributes [self m] (where (rename-attributes pred m))))
+
+(defexpression sql-query [select-list from-list where]
+  (to-sql [self]
+    (apply str (interpose " " (map to-sql [select-list from-list where]))))
+  (attributes [self]
+    (apply set/union (map attributes [select-list from-list where])))
+  (rename-attributes [self m]
+    (let [f (fn rename-attributes-helper [item] (rename-attributes item m))]
+      (sql-query (f select-list) (f from-list) (f where)))))
+
+(defexpression sql-statement [query]
+  (to-sql [self] (to-sql query))
+  (attributes [self] (attributes query))
+  (rename-attributes [self m] (sql-statement (rename-attributes query m))))
