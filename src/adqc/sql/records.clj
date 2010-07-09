@@ -38,6 +38,10 @@
          (defn ~factory-name ~fields
            (~java-name-dot ~@fields)))))
 
+;;; TODO: use clojure.lang.Named where it makes sense!
+;;; (although it includes getNamespace...)
+
+;;; TODO: maybe reserve the word 'operator' for LQP operators
 (defrecord InfixOperator [op-name]
   ToSQL
   (to-sql [self] op-name))
@@ -145,6 +149,9 @@
   (attributes [self] #{attr})
   (rename-attributes [self m]
     (column-expression (rename-attributes attr m) as)))
+
+(defn is-star? [col-expr]
+  (instance? ColumnStar (:attr col-expr)))
 
 (defexpression select-list [cols]
   (to-sql [self]

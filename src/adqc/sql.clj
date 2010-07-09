@@ -143,7 +143,7 @@
 (defmethod transform-node ::antlr-string [{text :text}] text)
 
 (deftn ::antlr-star children
-  (if-let [[x y] children]
+  (if-let [[x y] (seq children)]
     (infix-operator-expression (infix-operator "*") x y)
     (column-star)))
 
