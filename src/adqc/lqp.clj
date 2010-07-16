@@ -44,6 +44,9 @@
                           [(keyword (str/lower-case n)) i])
                         (ju/wall-hack-field TupleTypes "names" nil))))
 
+(def tuple-types-reverse
+     (zipmap (vals tuple-types) (keys tuple-types)))
+
 (def data-types
      (into {}
            (map (fn [f] [(-> (.getName ^java.lang.reflect.Field f)
@@ -54,12 +57,14 @@
                           (.getModifiers ^java.lang.reflect.Field %))
                         (.getFields java.sql.Types)))))
 
+(def data-types-reverse
+     (zipmap (vals data-types) (keys data-types)))
+
 ;;; TODO: improve defextractors so this can be made prettier
 (defextractors column-info-extractors ColumnMetaData
   :name            :name
-  :tuple-type      :tuple-type
-  :data-type       :data-type
-  :sql-type        (-> .getSQLtype)
+  :tuple-type      (-> :tuple-type tuple-types-reverse)
+  :data-type       (-> :data-type data-types-reverse)
   :column-size     :column-size
   :position        :position
   :primary-key?    (-> .isPrimaryKey)
@@ -71,9 +76,10 @@
 (defn get-table-schema [data-dictionary table-name]
   (let [schema (-> data-dictionary
                    (.getTableSchema table-name))
+        table-meta (.getSchema schema)
         cols (map #(extract-info column-info-extractors
-                                 (.getColumn schema %))
-                  (-> schema .getSchema .getColumnCount range))
+                                 (.getColumn table-meta %))
+                  (->> table-meta .getColumnCount inc (range 1)))
         ]
     {:columns (vec cols)
      ;; could get resource IDs here instead:
