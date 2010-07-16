@@ -1,0 +1,7 @@
+* Java side:
+
+** TODO Investigate converting operators to interfaces
+
+** TODO Consider replacing getParent with a Zipper-based approach
+   See http://functionaljava.googlecode.com/svn/artifacts/2.21/javadoc/fj/data/Zipper.html
+   
