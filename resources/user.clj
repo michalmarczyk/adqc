@@ -1,4 +1,4 @@
-(use '[clojure.contrib.repl-utils :only [show]]
+(use '[clojure.contrib.repl-utils :only [show expression-info]]
      'clojure.pprint)
 
 (require '[clojure

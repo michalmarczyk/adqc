@@ -154,8 +154,10 @@
 (deftn ::antlr-from-list [& sources] (from-list sources))
 (deftn ::antlr-relation [id & [as]] (relation-expression id as))
 (deftn ::antlr-where [pred] (where pred))
+;;; TODO: add fields for GROUP BY & HAVING
 (deftn ::antlr-query [select-list from-list where]
   (sql-query select-list from-list where))
+;;; TODO: add field for ORDER BY
 (deftn ::antlr-statement [query] (sql-statement query))
 
 ;;; Clojure maps and vectors will only occur here where antlr->clojure

@@ -2,6 +2,9 @@
   (:use [adqc
          [sql :only [parse-sql]]
          [util :only [defextractors extract-info]]]
+        [adqc.sql
+         [protocols :only [attributes]]
+         [records :as asr :only []]]
         [clojure
          [zip :as zip :only []]
          [walk :as walk :only []]
@@ -10,7 +13,8 @@
         [clojure.contrib
          [java-utils :as ju :only []]])
   (:import uk.org.ogsadai.dqp.execute.QueryPlanBuilder
-           uk.org.ogsadai.converters.databaseschema.ColumnMetaData
+           [uk.org.ogsadai.converters.databaseschema
+            ColumnMetaData TableMetaData]
            uk.org.ogsadai.dqp.common.DataNodeTable
            uk.org.ogsadai.tuple.TupleTypes))
 
@@ -29,8 +33,13 @@
      (initial-lqp query data-dictionary))))
 
 (defmacro defoperator [name]
-  `(defrecord ~name [~'head ~'body ~'children]))
+  `(do (defrecord ~name [~'head ~'body ~'children])
+       (defmethod print-method ~name [op# ~' ^java.io.Writer w]
+         (.write ~'w "#:")
+         (.write ~'w ~(clojure.core/name name))
+         (print-method (select-keys op# [:head :children]) ~'w))))
 
+(defoperator NilOperator)
 (defoperator TableScanOperator)
 (defoperator ProjectOperator)
 (defoperator SelectOperator)
@@ -80,11 +89,35 @@
         cols (map #(extract-info column-info-extractors
                                  (.getColumn table-meta %))
                   (->> table-meta .getColumnCount inc (range 1)))
-        ]
-    {:columns (vec cols)
-     ;; could get resource IDs here instead:
-     :data-nodes (into [] (map #(.getDataNode ^DataNodeTable %)
-                               (.getDataNodeTables schema)))}))
+        attrs (map #(asr/attribute (:name %) table-name nil)
+                   cols)]
+    (with-meta
+      {:attributes attrs
+       :columns (vec cols)
+       ;; could get resource IDs here instead:
+       :data-nodes (into [] (map #(.getDataNode ^DataNodeTable %)
+                                 (.getDataNodeTables schema)))}
+      {:type ::table-schema})))
+
+#_
+(defmethod print-method ::table-schema [table-schema ^java.io.Writer w]
+  (.write w "#:table-schema")
+  (print-method (vec (map :name (:columns table-schema))) w))
+
+;;; print-method overrides are needed to avoid huge XML printouts
+;;; for a sane REPLing experience
+
+(defmethod print-method ColumnMetaData [cmd ^java.io.Writer w]
+  (doto w
+    (.write "#<ColumnMetaData ")
+    (.write (.getName cmd))
+    (.write ">")))
+
+(defmethod print-method TableMetaData [tmd ^java.io.Writer w]
+  (doto w
+    (.write "#<TableMetaData ")
+    (.write (.getName tmd))
+    (.write ">")))
 
 ;;; TODO: put this where it logically belongs
 (defprotocol PSplitConjunction
@@ -98,41 +131,62 @@
 
 (extend-protocol PSplitConjunction
   Object
-  (split-conjunction [this] #{this}))
+  (split-conjunction [this] #{this})
+  nil
+  (split-conjunction [_] nil))
 
 ;;; TODO: replace with sth better?
-;;; actually this should be equijoin-predicate? and check whether
-;;; it's a simple attr1 = attr2 test with attr1 & 2 coming from
-;;; different sources
-(defn equijoin-predicate? [pred]
-  (= "=" (:pred-name pred)))
+(defn equility-predicate? [pred-expr]
+  (= "=" (-> pred-expr :pred :pred-name)))
 
 ;;; TODO: is it worthwhile to break partitions requiring full cross products?
 (defn partition-scans
   "Partitions the input collection of table-schemas into disjoint colls
   of schemas of tables residing on the same data nodes."
-  [table-schemas]
-  (->> table-schemas
+  [scan-ops]
+  (->> scan-ops
        ;; TODO: this isn't very refined:
-       (group-by (comp first :data-nodes))
+       (group-by (comp first :data-nodes :body))
        vals))
 
-;;; TODO: in progress
-;;; * extract join predicates from from-list
-(defn initial-lqp [query data-dictionary]
-  (let [{:keys [select-list from-list where]} query
-        table-schemas (map (comp get-table-schema :id)
-                           from-list)
+;;; NB: attribute comparison includes checking sources
+(defn predicate-sources
+  "Returns a subset of ops containing just the operators whose headings
+  include attributes mentioned in the pred."
+  [pred ops]
+  (let [pred-attrs (attributes pred)]
+    (->> ops
+         (filter #(->> % :head (some pred-attrs)))
+         (into #{}))))
+
+;;; TODO: in progress (OP? = optimisation phase?)
+;;; * DONE: prepare a TableScanOperator on each table involved
+;;; * prefer FilteredTableScanOperator where possible (OP?)
+;;; * DONE: partition scan ops into groups targetting the same data node
+;;; * DONE (?): fish out join predicates from WHERE
+;;; * handle explicit JOINs in FROM (by building sub-LQPs)
+;;; * for each partition, buid a graph of TSOs connected with equijoin preds
+;;; * split each such graph into connected components
+;;; * construct a join tree for each component...
+;;; * ...then a product tree for roots of the join trees
+;;; * randomise placement of ExchangeOperators
+(defn initial-lqp [statement data-dictionary]
+  (let [{:keys [select-list from-list where]} (:query statement)
+        table-schemas (map (comp (partial get-table-schema data-dictionary) :id)
+                           (:sources from-list))
         scan-ops (map (fn make-scan-op [table-schema]
-                        ;; "select * from foo" ?
-                        (TableScanOperator. table-schema nil nil))
+                        ;; TODO: decide what to put in :body
+                        ;; for TSOs **and modify partition-scans** if needed
+                        (TableScanOperator. (:attributes table-schema)
+                                            table-schema ; put the query in here?
+                                            nil))
                       table-schemas)
         scan-groups (partition-scans scan-ops)
         renames (into {} (map (juxt (comp :id :attr) :as)
                               (filter :as from-list)))
         preds (split-conjunction where)
-        equipreds (filter equijoin-predicate? preds)]
-    ()))
+        equipreds (filter equility-predicate? preds)]
+    scan-groups))
 
 #_
 (defn validate-lqp

@@ -181,6 +181,7 @@
   (attributes [self] (attributes pred))
   (rename-attributes [self m] (where (rename-attributes pred m))))
 
+;;; TODO: add fields for GROUP BY & HAVING
 (defexpression sql-query [select-list from-list where]
   (to-sql [self]
     (apply str (interpose " " (map to-sql [select-list from-list where]))))
@@ -190,6 +191,7 @@
     (let [f (fn rename-attributes-helper [item] (rename-attributes item m))]
       (sql-query (f select-list) (f from-list) (f where)))))
 
+;;; TODO: add field for ORDER BY
 (defexpression sql-statement [query]
   (to-sql [self] (to-sql query))
   (attributes [self] (attributes query))
