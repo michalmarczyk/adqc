@@ -47,6 +47,12 @@ The basic optimisation heuristic could be as follows:
 1. Consider providing something like `clojure.core/empty` (in the form of
    a protocol) to help when doing tree rotations.
 
+2. Zippers might be useful for implementing doubly-linked trees for consumption
+   from Java if the actual uk.org.ogsadai...Operators etc. are objects wrapping
+   a zipper on an underlying Clojure tree-like structure. Most operations would
+   just delegate to the current node, while .getParent would take advantage of
+   the zipper op.
+
 ## Misc. ideas / open questions
 
 1. How about asking the source for *ordered* output *always*?

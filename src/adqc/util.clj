@@ -31,3 +31,8 @@
           ~(into {} (map (fn [[k e-spec]]
                            [k (make-extractor arg e-spec)])
                          (partition 2 exts))))))
+
+(defn select-keys-with
+  "Returns a map containing only those entries in map whose key satisfies pred."
+  [map pred]
+  (select-keys map (filter pred (keys map))))

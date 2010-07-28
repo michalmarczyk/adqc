@@ -225,3 +225,34 @@
 
 (defmock :data-dictionary mock-data-dictionary-1
   (:table @*mocks*))
+
+(deftest test-attribute-equality-predicate?
+  (are [result sql]
+       (= result (attribute-equality-predicate? (parse-condition sql)))
+       true "foo = bar"
+       true "foo.id = bar.foo"
+       false "foo = bar + baz"
+       false "foo + bar = baz"))
+
+(def mock-scan-operator-authors
+     (let [table-schema (get-table-schema mock-data-dictionary-1
+                                          "authors")]
+       (adqc.lqp.TableScanOperator.
+        (:attributes table-schema)
+        table-schema
+        nil)))
+
+(def mock-scan-operator-authors-titles
+     (let [table-schema (get-table-schema mock-data-dictionary-1
+                                          "authors_titles")]
+       (adqc.lqp.TableScanOperator.
+        (:attributes table-schema)
+        table-schema
+        nil)))
+
+(deftest test-predicate-sources
+  (is (= (predicate-sources (parse-condition "id = foo.bar")
+                            #{mock-scan-operator-authors
+                              mock-scan-operator-authors-titles})
+         #{mock-scan-operator-authors})))
+  

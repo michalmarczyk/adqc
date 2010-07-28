@@ -135,9 +135,20 @@
   nil
   (split-conjunction [_] nil))
 
+(defn attribute? [expr]
+  (identical? adqc.sql.records.Attribute
+              (class expr)))
+
+(defn clear-attribute-source
+  "Returns a clone of attr with :src set to nil."
+  [attr]
+  (assoc attr :src nil))
+
 ;;; TODO: replace with sth better?
-(defn equility-predicate? [pred-expr]
-  (= "=" (-> pred-expr :pred :pred-name)))
+;;; see PredicateTypeExprVisitor
+(defn attribute-equality-predicate? [pred-expr]
+  (and (= "=" (-> pred-expr :pred :pred-name))
+       (every? attribute? ((juxt :lhs :rhs) pred-expr))))
 
 ;;; TODO: is it worthwhile to break partitions requiring full cross products?
 (defn partition-scans
@@ -150,13 +161,20 @@
        vals))
 
 ;;; NB: attribute comparison includes checking sources
+;;; TODO: check if explicitly renamed sources need to worry about
+;;; TODO: clashes with non-qualified attrs in predicates
 (defn predicate-sources
   "Returns a subset of ops containing just the operators whose headings
   include attributes mentioned in the pred."
   [pred ops]
   (let [pred-attrs (attributes pred)]
     (->> ops
-         (filter #(->> % :head (some pred-attrs)))
+         (filter #(->> %
+                       ((juxt :head
+                              (comp (partial map clear-attribute-source)
+                                    :head)))
+                       (apply concat)
+                       (some pred-attrs)))
          (into #{}))))
 
 ;;; TODO: in progress (OP? = optimisation phase?)
@@ -185,7 +203,8 @@
         renames (into {} (map (juxt (comp :id :attr) :as)
                               (filter :as from-list)))
         preds (split-conjunction where)
-        equipreds (filter equility-predicate? preds)]
+        {equipreds true
+         nonequipreds false} (group-by attribute-equality-predicate? preds)]
     scan-groups))
 
 #_
