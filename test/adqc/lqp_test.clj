@@ -1,6 +1,7 @@
 (ns adqc.lqp-test
   (:use clojure.test)
-  (:use [adqc sql lqp])
+  (:use [adqc sql lqp]
+        [adqc.lqp operators])
   (:import [uk.org.ogsadai.dqp.common DataNode]
            [uk.org.ogsadai.dqp.common.simple
             SimpleDataDictionary SimpleTableSchema]
@@ -237,7 +238,7 @@
 (def mock-scan-operator-authors
      (let [table-schema (get-table-schema mock-data-dictionary-1
                                           "authors")]
-       (adqc.lqp.TableScanOperator.
+       (make-table-scan-operator
         (:attributes table-schema)
         table-schema
         nil)))
@@ -245,7 +246,7 @@
 (def mock-scan-operator-authors-titles
      (let [table-schema (get-table-schema mock-data-dictionary-1
                                           "authors_titles")]
-       (adqc.lqp.TableScanOperator.
+       (make-table-scan-operator
         (:attributes table-schema)
         table-schema
         nil)))

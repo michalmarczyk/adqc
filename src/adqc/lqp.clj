@@ -2,6 +2,7 @@
   (:use [adqc
          [sql :only [parse-sql]]
          [util :only [defextractors extract-info]]]
+        [adqc.lqp operators]
         [adqc.sql
          [protocols :only [attributes]]
          [records :as asr :only []]]
@@ -31,21 +32,6 @@
                              getFederation
                              getDataDictionary)]
      (initial-lqp query data-dictionary))))
-
-(defmacro defoperator [name]
-  `(do (defrecord ~name [~'head ~'body ~'children])
-       (defmethod print-method ~name [op# ~' ^java.io.Writer w]
-         (.write ~'w "#:")
-         (.write ~'w ~(clojure.core/name name))
-         (print-method (select-keys op# [:head :children]) ~'w))))
-
-(defoperator NilOperator)
-(defoperator TableScanOperator)
-(defoperator ProjectOperator)
-(defoperator SelectOperator)
-(defoperator ProductOperator)
-(defoperator InnerThetaJoinOperator)
-(defoperator ExchangeOperator)
 
 (def tuple-types
      (into {}
@@ -150,6 +136,12 @@
   (and (= "=" (-> pred-expr :pred :pred-name))
        (every? attribute? ((juxt :lhs :rhs) pred-expr))))
 
+(defn attribute-eqv?
+  "Test attribute equivalence disregarding attribute sources."
+  [attr1 attr2]
+  (= (clear-attribute-source attr1)
+     (clear-attribute-source attr2)))
+
 ;;; TODO: is it worthwhile to break partitions requiring full cross products?
 (defn partition-scans
   "Partitions the input collection of table-schemas into disjoint colls
@@ -158,7 +150,7 @@
   (->> scan-ops
        ;; TODO: this isn't very refined:
        (group-by (comp first :data-nodes :body))
-       vals))
+       vals)) ; TODO: put this into a set for easier (in? pred part) ?
 
 ;;; NB: attribute comparison includes checking sources
 ;;; TODO: check if explicitly renamed sources need to worry about
@@ -195,16 +187,20 @@
         scan-ops (map (fn make-scan-op [table-schema]
                         ;; TODO: decide what to put in :body
                         ;; for TSOs **and modify partition-scans** if needed
-                        (TableScanOperator. (:attributes table-schema)
-                                            table-schema ; put the query in here?
-                                            nil))
+                        (make-table-scan-operator
+                         (:attributes table-schema)
+                         table-schema   ; put the query in here?
+                         nil))
                       table-schemas)
         scan-groups (partition-scans scan-ops)
         renames (into {} (map (juxt (comp :id :attr) :as)
                               (filter :as from-list)))
         preds (split-conjunction where)
         {equipreds true
-         nonequipreds false} (group-by attribute-equality-predicate? preds)]
+         nonequipreds false} (group-by attribute-equality-predicate? preds)
+        equipreds-sources (into {} (map (fn [ep]
+                                          (predicate-sources ep scan-ops))
+                                        equipreds))]
     scan-groups))
 
 #_

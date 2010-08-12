@@ -5,6 +5,8 @@
          [set :as set :only []]
          [walk :as walk :only []]]))
 
+;;; TODO: rewrite to resemble adqc.lqp.operators
+
 (defmacro defexpression [factory-name fields & method-impls]
   (let [java-name (->> factory-name
                        name

@@ -36,3 +36,19 @@
   "Returns a map containing only those entries in map whose key satisfies pred."
   [map pred]
   (select-keys map (filter pred (keys map))))
+
+(defn to-java-name [clj-name & {:keys [prefix suffix]}]
+  (let [prefix (when prefix (str prefix \-))
+        suffix (when suffix (str \- suffix))]
+    (->> (str prefix clj-name suffix)
+         (.split #"-")
+         (mapcat (juxt #(Character/toUpperCase
+                         (.charAt ^String % 0))
+                       #(subs ^String % 1)))
+         (apply str)
+         symbol)))
+
+(defn to-factory-name [clj-name & {:keys [prefix suffix]}]
+  (let [prefix (when prefix (str prefix \-))
+        suffix (when suffix (str \- suffix))]
+    (symbol (str "make-" prefix clj-name suffix))))
