@@ -3,6 +3,10 @@
 This is a reimplementation of the [OGSA-DAI][] query compiler in
 Clojure.
 
+Work on this project up to 16th August 2010 was done as part of the
+Google Summer of Code 2010, by Michał Marczyk, under the supervision
+of Bartosz Dobrzelecki.
+
 # Building
 
 You will need [Leiningen], a popular Clojure build tool.  See the file
