@@ -75,7 +75,7 @@
         cols (map #(extract-info column-info-extractors
                                  (.getColumn table-meta %))
                   (->> table-meta .getColumnCount inc (range 1)))
-        attrs (map #(asr/attribute (:name %) table-name nil)
+        attrs (map #(asr/make-attribute (:name %) table-name nil)
                    cols)]
     (with-meta
       {:attributes attrs

@@ -97,16 +97,17 @@
 (defmethod transform-node nil [token] token)
 
 (deftn ::antlr-function [f & args]
-  (function-application-expression f args))
+  (make-function-application-expression f args))
 
 (deftn ::antlr-tablecolumn children
   (if (next children)
-    (attribute (second children) (first children) nil)
-    (attribute (first children) nil nil)))
+    (make-attribute (second children) (first children) nil)
+    (make-attribute (first children) nil nil)))
 
 (defmacro deftion [dispatch-val op]
   `(deftn ~dispatch-val [lhs# rhs#]
-     (infix-operator-expression (infix-operator ~(str op)) lhs# rhs#)))
+     (make-infix-operator-expression
+      (make-infix-operator ~(str op)) lhs# rhs#)))
 
 (deftion ::antlr-infix-plus +)
 (deftion ::antlr-infix-minus -)
@@ -114,7 +115,8 @@
 
 (defmacro deftipn [dispatch-val pred]
   `(deftn ~dispatch-val [lhs# rhs#]
-     (infix-predicate-expression (infix-predicate ~(str pred)) lhs# rhs#)))
+     (make-infix-predicate-expression
+      (make-infix-predicate ~(str pred)) lhs# rhs#)))
 
 (deftipn ::antlr-= =)
 (deftipn ::antlr-< <)
@@ -125,18 +127,18 @@
 (deftipn ::antlr-<> <>)
 (deftipn ::antlr-like LIKE)
 
-(deftn ::antlr-is-null [col] (is-null-expression col))
+(deftn ::antlr-is-null [col] (make-is-null-expression col))
 
-(deftn ::antlr-and [lhs rhs] (and-expression lhs rhs))
-(deftn ::antlr-or  [lhs rhs] (or-expression lhs rhs))
-(deftn ::antlr-not [pred]    (negation-expression pred))
+(deftn ::antlr-and [lhs rhs] (make-and-expression lhs rhs))
+(deftn ::antlr-or  [lhs rhs] (make-or-expression lhs rhs))
+(deftn ::antlr-not [pred]    (make-negation-expression pred))
 
 ;;; do I want to have a separate Between record instead?
 (deftn ::antlr-between [attr low high]
-  (let [leq (infix-predicate "<=")]
-    (and-expression
-     (infix-predicate-expression leq low attr)
-     (infix-predicate-expression leq attr high))))
+  (let [leq (make-infix-predicate "<=")]
+    (make-and-expression
+     (make-infix-predicate-expression leq low attr)
+     (make-infix-predicate-expression leq attr high))))
 
 (defmethod transform-node ::antlr-id [{text :text}] text) ; is this ok?
 (defmethod transform-node ::antlr-int [{text :text}] (BigInteger. text))
@@ -144,21 +146,21 @@
 
 (deftn ::antlr-star children
   (if-let [[x y] (seq children)]
-    (infix-operator-expression (infix-operator "*") x y)
-    (column-star)))
+    (make-infix-operator-expression (make-infix-operator "*") x y)
+    (make-column-star)))
 
 (deftn ::antlr-column [attr & [as]]
-  (column-expression attr as))
+  (make-column-expression attr as))
 
-(deftn ::antlr-select-list [& cols] (select-list cols))
-(deftn ::antlr-from-list [& sources] (from-list sources))
-(deftn ::antlr-relation [id & [as]] (relation-expression id as))
-(deftn ::antlr-where [pred] (where pred))
+(deftn ::antlr-select-list [& cols] (make-select-list cols))
+(deftn ::antlr-from-list [& sources] (make-from-list sources))
+(deftn ::antlr-relation [id & [as]] (make-relation-expression id as))
+(deftn ::antlr-where [pred] (make-where-clause pred))
 ;;; TODO: add fields for GROUP BY & HAVING
-(deftn ::antlr-query [select-list from-list where]
-  (sql-query select-list from-list where))
+(deftn ::antlr-query [select-list from-list where-clause]
+  (make-sql-query select-list from-list where-clause))
 ;;; TODO: add field for ORDER BY
-(deftn ::antlr-statement [query] (sql-statement query))
+(deftn ::antlr-statement [query] (make-sql-statement query))
 
 ;;; Clojure maps and vectors will only occur here where antlr->clojure
 ;;; constructs them, so I'm free to use map? and vector? to determine

@@ -46,17 +46,17 @@
 (deftest test-attributes
   (are [expr attrs]
        (= (-> expr parse-expression attributes) attrs)
-       "foo" #{(attribute "foo" nil nil)}
-       "foo.bar + quux" #{(attribute "bar" "foo" nil)
-                          (attribute "quux" nil nil)})
+       "foo" #{(make-attribute "foo" nil nil)}
+       "foo.bar + quux" #{(make-attribute "bar" "foo" nil)
+                          (make-attribute "quux" nil nil)})
   (are [pred attrs]
        (= (-> pred parse-condition attributes) attrs)
-       "foo.bar < quux" #{(attribute "bar" "foo" nil)
-                          (attribute "quux" nil nil)}
+       "foo.bar < quux" #{(make-attribute "bar" "foo" nil)
+                          (make-attribute "quux" nil nil)}
        "foo < bar AND baz.quux LIKE '%asdf'"
-       #{(attribute "foo" nil nil)
-         (attribute "bar" nil nil)
-         (attribute "quux" "baz" nil)}))
+       #{(make-attribute "foo" nil nil)
+         (make-attribute "bar" nil nil)
+         (make-attribute "quux" "baz" nil)}))
 
 (deftest test-rename-attributes
   (are [expr expr* m]

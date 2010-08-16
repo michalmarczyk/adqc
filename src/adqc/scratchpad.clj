@@ -256,3 +256,54 @@
   (rename-attributes
    [self m]
    (IsNullExpression. (rename-attributes col m))))
+
+#_
+(defmacro defexpression [factory-name fields & method-impls]
+  (let [java-name (->> factory-name
+                       name
+                       (.split #"-")
+                       (mapcat (juxt #(Character/toUpperCase
+                                       (.charAt ^String % 0))
+                                     #(-> ^String %
+                                          (.substring 1)
+                                          (->> (apply str)))))
+                       (apply str)
+                       symbol)
+        java-name-dot (symbol (str java-name "."))
+        impls-map (zipmap (map (comp keyword first) method-impls)
+                          (for [[m-name & m-tail] method-impls]
+                            (let [transformed-tail
+                                  (walk/prewalk
+                                   (fn [f]
+                                     (if (and (seq? f)
+                                              (seq f)
+                                              (= (first f) factory-name))
+                                       (cons java-name-dot (rest f))
+                                       f))
+                                   m-tail)]
+                              `(~m-name ~@transformed-tail))))]
+    `(do (defrecord ~java-name ~fields
+           ~'ToSQL
+           ~(:to-sql impls-map)
+           ~'SQLExpression
+           ~(:attributes impls-map)
+           ~(:rename-attributes impls-map))
+         (defn ~factory-name ~fields
+           (~java-name-dot ~@fields)))))
+
+;;; from defoperator
+
+#_
+(alter-var-root #'operator-qualified-names
+                conj
+                (symbol (str (.name *ns*)
+                             "."
+                             '~java-name)))
+
+#_
+(def operator-qualified-names #{})
+
+#_
+(defmacro import-all-operators []
+  `(do ~@(map (fn [op-name] `(import ~op-name))
+              operator-qualified-names)))
