@@ -17,7 +17,11 @@
            [uk.org.ogsadai.converters.databaseschema
             ColumnMetaData TableMetaData]
            uk.org.ogsadai.dqp.common.DataNodeTable
-           uk.org.ogsadai.tuple.TupleTypes))
+           uk.org.ogsadai.tuple.TupleTypes
+           [adqc.sql.records Attribute InfixPredicateExpression ColumnStar]))
+
+;;; TODO: Move all functions which turned out to be necessary for LQP
+;;; TODO: building into the namespaces where they properly belong.
 
 (declare initial-lqp validate-lqp)
 
@@ -122,18 +126,28 @@
   (split-conjunction [_] nil))
 
 (defn attribute? [expr]
-  (identical? adqc.sql.records.Attribute
-              (class expr)))
+  (instance? Attribute expr))
 
 (defn clear-attribute-source
   "Returns a clone of attr with :src set to nil."
   [attr]
   (assoc attr :src nil))
 
+(defn binary-predicate-expression? [pred-expr]
+  (some #(instance? % pred-expr)
+        [adqc.sql.records.InfixPredicateExpression
+         adqc.sql.records.AndExpression
+         adqc.sql.records.OrExpression]))
+
+(defn infix-predicate-expression? [pred-expr]
+  (instance? InfixPredicateExpression
+             pred-expr))
+
 ;;; TODO: replace with sth better?
 ;;; see PredicateTypeExprVisitor
 (defn attribute-equality-predicate? [pred-expr]
-  (and (= "=" (-> pred-expr :pred :pred-name))
+  (and (infix-predicate-expression? pred-expr)
+       (= "=" (-> pred-expr :pred :pred-name))
        (every? attribute? ((juxt :lhs :rhs) pred-expr))))
 
 (defn attribute-eqv?
@@ -169,6 +183,46 @@
                        (some pred-attrs)))
          (into #{}))))
 
+(defn column-star? [col-expr]
+  (instance? ColumnStar (:attr col-expr)))
+
+(defn column-star-select-list? [select-list]
+  (let [cols (:cols select-list)]
+    (and (== (count cols) 1)
+         (column-star? (first cols)))))
+
+(defn join-group [equipreds ops]
+  (reduce (fn [left right]
+            (if-let [join-pred
+                     (some (fn [equipred]
+                             (let [lhs (:lhs equipred)
+                                   rhs (:rhs equipred)]
+                               (or (and (some #{lhs} (:head left))
+                                        (some #{rhs} (:head right)))
+                                   (and (some #{rhs} (:head left))
+                                        (some #{lhs} (:head right))))))
+                           equipreds)]
+              (make-inner-theta-join-operator
+               (concat (:head left)
+                       (:head right))
+               join-pred
+               [left right])
+              (make-product-operator
+               (concat (:head left)
+                       (:head right))
+               nil
+               [left right])))
+          ops))
+
+(defn add-exchange [op]
+  (make-exchange-operator (:head op) nil [op]))
+
+(defn add-exchanges [ops]
+  (if (< 2 (count ops))
+    ops
+    (vec (concat [(first ops)]
+                 (map add-exchange (rest ops))))))
+
 ;;; TODO: in progress (OP? = optimisation phase?)
 ;;; * DONE: prepare a TableScanOperator on each table involved
 ;;; * prefer FilteredTableScanOperator where possible (OP?)
@@ -181,7 +235,7 @@
 ;;; * ...then a product tree for roots of the join trees
 ;;; * randomise placement of ExchangeOperators
 (defn initial-lqp [statement data-dictionary]
-  (let [{:keys [select-list from-list where]} (:query statement)
+  (let [{:keys [select-list from-list where-clause]} (:query statement)
         table-schemas (map (comp (partial get-table-schema data-dictionary) :id)
                            (:sources from-list))
         scan-ops (map (fn make-scan-op [table-schema]
@@ -195,13 +249,16 @@
         scan-groups (partition-scans scan-ops)
         renames (into {} (map (juxt (comp :id :attr) :as)
                               (filter :as from-list)))
-        preds (split-conjunction where)
+        preds (split-conjunction (:pred where-clause))
         {equipreds true
          nonequipreds false} (group-by attribute-equality-predicate? preds)
-        equipreds-sources (into {} (map (fn [ep]
-                                          (predicate-sources ep scan-ops))
-                                        equipreds))]
-    scan-groups))
+        #_equipreds-sources #_(into {} (map (fn [ep]
+                                              (predicate-sources ep scan-ops))
+                                            equipreds))
+        partition-joins (add-exchanges
+                         (map (partial join-group equipreds) scan-groups))
+        joins (join-group equipreds partition-joins)]
+    (make-root-operator (:head joins) nil joins)))
 
 #_
 (defn validate-lqp
