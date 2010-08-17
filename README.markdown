@@ -14,8 +14,12 @@ repository](http://github.com/michalmarczyk/adqc).
 # Building
 
 You will need [Leiningen](http://github.com/technomancy/leiningen), a
-popular Clojure build tool.  See the file `project.clj` for details on
-non-managed dependencies.
+popular Clojure build tool.  You will also need the jars from the
+OGSA-DAI distribution; these are available from
+[SourceForge](http://sourceforge.net/projects/ogsa-dai/files/).  You
+can either install them into your local Maven 2 repository and have
+Leiningen pull them into the project directory or place them in `lib/`
+by hand.
 
 # Licence
 
