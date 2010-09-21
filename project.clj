@@ -1,4 +1,4 @@
-(defproject adqc "0.0.1-SNAPSHOT"
+(defproject adqc "0.0.2-SNAPSHOT"
   :description "Adaptive Distributed Query Compiler"
   ;; the dependencies also include the OGSA-DAI jars (OGSA-DAI proper
   ;; & third party); since these cannot all be obtained from a mvn
